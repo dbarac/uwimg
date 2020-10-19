@@ -48,6 +48,17 @@ image make_integral_image(image im)
 {
     image integ = make_image(im.w, im.h, im.c);
     // TODO: fill in the integral image
+    for (int x = 0; x < im.w; x++) {
+        for (int y = 0; y < im.h; y++) {
+            for (int c = 0; c < im.c; c++) {
+                float val = get_pixel(im, x, y, c);
+                val += (y > 0) ? get_pixel(integ, x, y-1, c) : 0;
+                val += (x > 0) ? get_pixel(integ, x-1, y, c) : 0;
+                val -= (x > 0 && y > 0) ? get_pixel(integ, x-1, y-1, c) : 0;
+                set_pixel(integ, x, y, c, val);
+            }
+        }
+    }
     return integ;
 }
 
@@ -61,8 +72,24 @@ image box_filter_image(image im, int s)
     image integ = make_integral_image(im);
     image S = make_image(im.w, im.h, im.c);
     // TODO: fill in S using the integral image.
+    for (int x = 0; x < im.w; x++) {
+        for (int y = 0; y < im.h; y++) {
+            for (int c = 0; c < im.c; c++) {
+                float val = get_pixel(integ, x + s/2, y + s/2, c)
+                            - get_pixel(integ, x - s/2 - 1, y + s/2, c)
+                            - get_pixel(integ, x + s/2, y - s/2 - 1, c)
+                            + get_pixel(integ, x - s/2 - 1, y - s/2 - 1, c);
+                set_pixel(S, x, y, c, val/(s*s));
+            }
+        }
+    }
+    free_image(integ);
     return S;
 }
+
+//weighted sum around x, y
+//implemented in filter_image.c
+float convolve_pixel(image im, image filter, int x, int y, int c);
 
 // Calculate the time-structure matrix of an image pair.
 // image im: the input image.
@@ -81,9 +108,27 @@ image time_structure_matrix(image im, image prev, int s)
     }
 
     // TODO: calculate gradients, structure components, and smooth them
-
-    image S;
-
+    image S = make_image(im.w, im.h, 5);
+    image gx = make_gx_filter();
+    image gy = make_gy_filter();
+    
+    for (int x = 0; x < im.w; x++) {
+        for (int y = 0; y < im.h; y++) {
+            float Ix = convolve_pixel(im, gx, x, y, 0);
+            float Iy = convolve_pixel(im, gy, x, y, 0);
+            float It = get_pixel(im, x, y, 0) - get_pixel(prev, x, y, 0);
+            set_pixel(S, x, y, 0, Ix*Ix);
+            set_pixel(S, x, y, 1, Iy*Iy);
+            set_pixel(S, x, y, 2, Iy*Ix);
+            set_pixel(S, x, y, 3, Ix*It);
+            set_pixel(S, x, y, 4, Iy*It);
+        }
+    }
+    free_image(gx);
+    free_image(gy);
+    image S_smooth = box_filter_image(S, s);
+    free_image(S);
+    S = S_smooth;
     if(converted){
         free_image(im); free_image(prev);
     }
@@ -98,6 +143,7 @@ image velocity_image(image S, int stride)
     image v = make_image(S.w/stride, S.h/stride, 3);
     int i, j;
     matrix M = make_matrix(2,2);
+    matrix M_inv, It = make_matrix(2, 1), V = make_matrix(2, 1);
     for(j = (stride-1)/2; j < S.h; j += stride){
         for(i = (stride-1)/2; i < S.w; i += stride){
             float Ixx = S.data[i + S.w*j + 0*S.w*S.h];
@@ -109,12 +155,27 @@ image velocity_image(image S, int stride)
             // TODO: calculate vx and vy using the flow equation
             float vx = 0;
             float vy = 0;
+            M.data[0][0] = Ixx;
+            M.data[0][1] = Ixy;
+            M.data[1][0] = Ixy;
+            M.data[1][1] = Iyy;
 
+            It.data[0][0] = -Ixt;
+            It.data[1][0] = -Iyt;
+            matrix M_inv = matrix_invert(M);
+            if (M_inv.data == NULL)
+                continue; //not invertible
+            V = matrix_mult_matrix(M_inv, It);
+            vx = V.data[0][0];
+            vy = V.data[1][0];
             set_pixel(v, i/stride, j/stride, 0, vx);
             set_pixel(v, i/stride, j/stride, 1, vy);
         }
     }
     free_matrix(M);
+    free_matrix(M_inv);
+    free_matrix(V);
+    free_matrix(It);
     return v;
 }
 
