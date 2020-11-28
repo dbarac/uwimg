@@ -16,17 +16,24 @@ void activate_matrix(matrix m, ACTIVATION a)
             double x = m.data[i][j];
             if(a == LOGISTIC){
                 // TODO
+                m.data[i][j] = 1 / (1 + exp(-x));
             } else if (a == RELU){
                 // TODO
+                m.data[i][j] = x > 0 ? x : 0;
             } else if (a == LRELU){
                 // TODO
+                m.data[i][j] = x > 0 ? x : 0.1*x;
             } else if (a == SOFTMAX){
                 // TODO
+                m.data[i][j] = exp(x);
             }
             sum += m.data[i][j];
         }
         if (a == SOFTMAX) {
             // TODO: have to normalize by sum if we are using SOFTMAX
+            for (int j = 0; j < m.cols; j++) {
+                m.data[i][j] /= sum;
+            }
         }
     }
 }
@@ -43,6 +50,16 @@ void gradient_matrix(matrix m, ACTIVATION a, matrix d)
         for(j = 0; j < m.cols; ++j){
             double x = m.data[i][j];
             // TODO: multiply the correct element of d by the gradient
+            if(a == LOGISTIC){
+                // TODO
+                d.data[i][j] *= x * (1 - x);
+            } else if (a == RELU){
+                // TODO
+                d.data[i][j] *= x > 0 ? 1 : 0;
+            } else if (a == LRELU){
+                // TODO
+                d.data[i][j] *= x > 0 ? 1 : 0.1;
+            }
         }
     }
 }
@@ -59,8 +76,8 @@ matrix forward_layer(layer *l, matrix in)
 
     // TODO: fix this! multiply input by weights and apply activation function.
     matrix out = make_matrix(in.rows, l->w.cols);
-
-
+    out = matrix_mult_matrix(l->in, l->w);
+    activate_matrix(out, l->activation);
     free_matrix(l->out);// free the old output
     l->out = out;       // Save the current output for gradient calculation
     return out;
@@ -72,22 +89,24 @@ matrix forward_layer(layer *l, matrix in)
 // returns: matrix, partial derivative of loss w.r.t. input to layer
 matrix backward_layer(layer *l, matrix delta)
 {
+    //printf("m r %d c %d\n d r %d d c %d", l->out.rows, l->out.cols, delta.rows, delta.cols);
     // 1.4.1
     // delta is dL/dy
     // TODO: modify it in place to be dL/d(xw)
-
-
+    gradient_matrix(l->out, l->activation, delta);
     // 1.4.2
     // TODO: then calculate dL/dw and save it in l->dw
     free_matrix(l->dw);
-    matrix dw = make_matrix(l->w.rows, l->w.cols); // replace this
-    l->dw = dw;
+    matrix in_transpose = transpose_matrix(l->in);
+    l->dw = matrix_mult_matrix(in_transpose, delta);
+    free_matrix(in_transpose);
 
     
     // 1.4.3
     // TODO: finally, calculate dL/dx and return it.
-    matrix dx = make_matrix(l->in.rows, l->in.cols); // replace this
-
+    matrix w_transpose = transpose_matrix(l->w);
+    matrix dx = matrix_mult_matrix(delta, w_transpose);
+    free_matrix(w_transpose);
     return dx;
 }
 
@@ -101,13 +120,17 @@ void update_layer(layer *l, double rate, double momentum, double decay)
     // TODO:
     // Calculate Δw_t = dL/dw_t - λw_t + mΔw_{t-1}
     // save it to l->v
-
-
+    matrix v = make_matrix(l->dw.rows, l->dw.cols);
+    for (int i = 0; i < v.rows; ++i) {
+        for (int j = 0; j < v.cols; ++j) {
+            v.data[i][j] = l->dw.data[i][j] - decay*l->w.data[i][j] + momentum*l->v.data[i][j];
+        }
+    }
     // Update l->w
-
-
+    l->w = axpy_matrix(rate, v, l->w);
     // Remember to free any intermediate results to avoid memory leaks
-
+    free_matrix(l->v);
+    l->v = v;
 }
 
 // Make a new layer for our model
@@ -229,7 +252,7 @@ double cross_entropy_loss(matrix y, matrix p)
 void train_model(model m, data d, int batch, int iters, double rate, double momentum, double decay)
 {
     int e;
-    for(e = 0; e < iters; ++e){
+    for (e = 0; e < iters; ++e) {
         data b = random_batch(d, batch);
         matrix p = forward_model(m, b.X);
         fprintf(stderr, "%06d: Loss: %f\n", e, cross_entropy_loss(b.y, p));
